@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import fetch from "node-fetch";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TARGET_MINT = process.env.TARGET_MINT;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID; // group or personal chat
-const TOKEN_NAME = "Soldiumx";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TOKEN_NAME = "SoldiumX";
+
+// In-memory storage of last 10 buys
+let lastBuys = [];
 
 // Helper to send Telegram messages
 async function sendTelegramMessage(text, chat_id = TELEGRAM_CHAT_ID) {
@@ -18,12 +22,30 @@ async function sendTelegramMessage(text, chat_id = TELEGRAM_CHAT_ID) {
   }
 }
 
+// Fetch USD price from DexScreener
+async function getTokenPrice() {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${TARGET_MINT}`);
+    const data = await res.json();
+    const pair = data.pairs[0];
+    return {
+      price: parseFloat(pair.priceUsd),
+      fdv: parseFloat(pair.fdv),
+      change24h: pair.priceChange.h24,
+      url: pair.url
+    };
+  } catch (err) {
+    console.error("DexScreener fetch error:", err);
+    return null;
+  }
+}
+
 // POST: handle Telegram commands and Helius webhook
 export async function POST(req) {
   try {
     const data = await req.json();
 
-    // === Case 1: Telegram command ===
+    // --- Telegram Commands ---
     if (data.message && data.message.text) {
       const chat_id = data.message.chat.id;
       const text = data.message.text.toLowerCase();
@@ -34,23 +56,28 @@ export async function POST(req) {
                 `💡 Commands:\n` +
                 `/start - Welcome message\n` +
                 `/ping - Bot status\n` +
-                `/price - Token price`;
+                `/price - Token price\n` +
+                `/lastbuys - Recent buyers`;
       } else if (text === "/ping") {
-        reply = "✅ Bot is active and running on Vercel";
+        reply = "✅ Bot is running on Vercel";
       } else if (text === "/price") {
-        try {
-          const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${TARGET_MINT}`);
-          const dexData = await res.json();
-          const pair = dexData.pairs[0];
-
+        const priceData = await getTokenPrice();
+        if (priceData) {
           reply = `📊 *${TOKEN_NAME} Stats*\n\n` +
-                  `💰 Price: $${parseFloat(pair.priceUsd).toFixed(6)}\n` +
-                  `📈 24h Change: ${pair.priceChange.h24}%\n` +
-                  `🏦 FDV: $${parseFloat(pair.fdv).toLocaleString()}\n` +
-                  `🔗 [View on DexScreener](${pair.url})`;
-        } catch (err) {
+                  `💰 Price: $${priceData.price.toFixed(6)}\n` +
+                  `📈 24h Change: ${priceData.change24h}%\n` +
+                  `🏦 FDV: $${priceData.fdv.toLocaleString()}\n` +
+                  `🔗 [View on DexScreener](${priceData.url})`;
+        } else {
           reply = "❌ Error fetching price. Try again later.";
-          console.error("Price fetch error:", err);
+        }
+      } else if (text === "/lastbuys") {
+        if (lastBuys.length === 0) {
+          reply = "No recent buys yet!";
+        } else {
+          reply = `🛒 *Last Buys*\n` + lastBuys.map((b, i) =>
+            `${i+1}. ${b.amount} ${TOKEN_NAME} → ${b.toWallet} ($${b.usdValue.toFixed(2)})`
+          ).join("\n");
         }
       }
 
@@ -58,8 +85,9 @@ export async function POST(req) {
       return NextResponse.json({ ok: true });
     }
 
-    // === Case 2: Helius webhook (only monitor BUY) ===
+    // --- Helius Webhook (Buy Only) ---
     if (Array.isArray(data)) {
+      const priceData = await getTokenPrice();
       for (const tx of data) {
         if (!tx.tokenTransfers) continue;
 
@@ -67,16 +95,21 @@ export async function POST(req) {
           if (t.mint !== TARGET_MINT) continue;
 
           const amount = Number(t.tokenAmount || 0);
+          if (amount <= 0) continue; // only buy
 
-          // Only monitor buys (to the token's main address)
-          if (amount <= 0) continue;
+          const usdValue = priceData ? amount * priceData.price : 0;
 
           const message =
             `🟢 *NEW BUY ALERT!* 🟢\n\n` +
             `💎 Token: ${TOKEN_NAME}\n` +
-            `💰 Amount: ${Math.abs(amount)}\n` +
+            `💰 Amount: ${amount}\n` +
+            `💵 USD Value: $${usdValue.toFixed(2)}\n` +
             `🧑 Buyer Wallet: \`${t.to}\`\n` +
             `📥 From Wallet: \`${t.from}\``;
+
+          // Store last 10 buys
+          lastBuys.unshift({ amount, usdValue, toWallet: t.to });
+          if (lastBuys.length > 10) lastBuys.pop();
 
           await sendTelegramMessage(message);
         }
