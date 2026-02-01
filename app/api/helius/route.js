@@ -1,21 +1,52 @@
-import fetch from "node-fetch";
+import { NextResponse } from "next/server";
 
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const WEBHOOK_URL = "https://YOUR-PROJECT-NAME.vercel.app/api/helius";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TARGET_MINT = process.env.TARGET_MINT;
 
-const body = {
-  webhookURL: WEBHOOK_URL,
-  transactionTypes: ["SWAP"],
-  accountAddresses: [
-    "6yi6hyPp1Ubgn8iipWtDLt7Jou1zECTPm2pnheBmpump"
-  ],
-  webhookType: "enhanced"
-};
+export async function POST(req) {
+  try {
+    const data = await req.json();
 
-await fetch(`https://api.helius.xyz/v0/webhooks?api-key=${HELIUS_API_KEY}`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(body)
-});
+    // Helius sends an array of transactions
+    for (const tx of data) {
+      if (!tx.tokenTransfers) continue;
 
-console.log("Webhook created ✅");
+      for (const t of tx.tokenTransfers) {
+        if (t.mint !== TARGET_MINT) continue;
+
+        const amount = Number(t.tokenAmount || 0);
+        const type = amount > 0 ? "🟢 BUY" : "🔴 SELL";
+
+        const message =
+          `${type}\n` +
+          `Token: ${t.mint}\n` +
+          `Amount: ${Math.abs(amount)}`;
+
+        await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: TELEGRAM_CHAT_ID,
+              text: message
+            })
+          }
+        );
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Webhook error" }, { status: 500 });
+  }
+}
+
+export async function GET() {
+  return NextResponse.json(
+    { error: "POST only" },
+    { status: 405 }
+  );
+}
