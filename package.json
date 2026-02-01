@@ -1,5 +1,5 @@
 {
-  "webhookURL": "https://YOUR-PROJECT-NAME.vercel.app/api/helius",
+  "webhookURL": "https://soldiumx.tech/api/helius",
   "transactionTypes": ["SWAP"],
   "accountAddresses": [
     "6yi6hyPp1Ubgn8iipWtDLt7Jou1zECTPm2pnheBmpump"
