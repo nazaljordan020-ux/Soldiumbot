@@ -9,7 +9,7 @@ app = Flask(__name__)
 # Config
 TOKEN = os.getenv("BOT_TOKEN")
 MINT = "6yi6hyPp1Ubgn8iipWtDLt7Jou1zECTPm2pnheBmpump"
-TOKEN_NAME = "SoldiumX"
+TOKEN_NAME = "Soldiumx"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"👋 Welcome to {TOKEN_NAME} Official Bot!\nUse /price to see live statistics.")
