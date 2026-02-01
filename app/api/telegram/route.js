@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TARGET_MINT = process.env.TARGET_MINT;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const TOKEN_NAME = "SoldiumX";
+const TOKEN_NAME = "Soldiumx";
 
 // In-memory storage of last 10 buys
 let lastBuys = [];
