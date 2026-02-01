@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TARGET_MINT = process.env.TARGET_MINT; // your token mint
-const TOKEN_NAME = "SoldiumX";
+const TOKEN_NAME = "Soldiumx";
 
 export async function POST(req) {
   try {
