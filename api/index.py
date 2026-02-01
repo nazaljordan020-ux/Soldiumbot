@@ -9,7 +9,7 @@ app = Flask(__name__)
 # Config
 TOKEN = os.getenv("BOT_TOKEN")
 MINT = "6yi6hyPp1Ubgn8iipWtDLt7Jou1zECTPm2pnheBmpump"
-TOKEN_NAME = "SoldiumX"
+TOKEN_NAME = "Soldiumx"
 
 # Create bot safely
 bot = Bot(token=TOKEN) if TOKEN else None
