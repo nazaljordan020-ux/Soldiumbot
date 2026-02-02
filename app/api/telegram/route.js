@@ -6,10 +6,41 @@ const TARGET_MINT = process.env.TARGET_MINT;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TOKEN_NAME = "Soldiumx";
 
-// In-memory storage of last 10 buys
+// ===== ADMIN & SPAM PROTECTION =====
+
+// Admin IDs from Vercel env (comma separated)
+const ADMIN_IDS = process.env.TELEGRAM_ADMIN_IDS
+  ? process.env.TELEGRAM_ADMIN_IDS.split(",").map(id => Number(id.trim()))
+  : [];
+
+// Mute switch
+let isMuted = false;
+
+// Spam detection
+function isSpam(text = "") {
+  const spamWords = [
+    "airdrop",
+    "free",
+    "claim",
+    "http",
+    "https",
+    "www",
+    ".com",
+    ".io",
+    ".xyz"
+  ];
+  const lower = text.toLowerCase();
+  return spamWords.some(word => lower.includes(word));
+}
+
+function isAdmin(userId) {
+  return ADMIN_IDS.includes(Number(userId));
+}
+
+// ===== IN-MEMORY STORAGE =====
 let lastBuys = [];
 
-// Helper to send Telegram messages
+// ===== TELEGRAM SENDER =====
 async function sendTelegramMessage(text, chat_id = TELEGRAM_CHAT_ID) {
   try {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -22,10 +53,12 @@ async function sendTelegramMessage(text, chat_id = TELEGRAM_CHAT_ID) {
   }
 }
 
-// Fetch USD price from DexScreener
+// ===== TOKEN PRICE =====
 async function getTokenPrice() {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${TARGET_MINT}`);
+    const res = await fetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${TARGET_MINT}`
+    );
     const data = await res.json();
     const pair = data.pairs[0];
     return {
@@ -40,54 +73,83 @@ async function getTokenPrice() {
   }
 }
 
-// POST: handle Telegram commands and Helius webhook
+// ===== POST HANDLER =====
 export async function POST(req) {
   try {
     const data = await req.json();
 
-    // --- Telegram Commands ---
+    // ---------- TELEGRAM COMMANDS ----------
     if (data.message && data.message.text) {
       const chat_id = data.message.chat.id;
-      const text = data.message.text.toLowerCase();
-      let reply = "";
+      const user_id = data.message.from.id;
+      const textRaw = data.message.text;
+      const text = textRaw.toLowerCase();
 
-      if (text === "/start") {
-        reply = `🚀 *Welcome to ${TOKEN_NAME} Bot!*\n\n` +
-                `💡 Commands:\n` +
-                `/start - Welcome message\n` +
-                `/ping - Bot status\n` +
-                `/price - Token price\n` +
-                `/lastbuys - Recent buyers`;
-      } else if (text === "/ping") {
-        reply = "✅ Bot is running on Vercel";
-      } else if (text === "/price") {
-        const priceData = await getTokenPrice();
-        if (priceData) {
-          reply = `📊 *${TOKEN_NAME} Stats*\n\n` +
-                  `💰 Price: $${priceData.price.toFixed(6)}\n` +
-                  `📈 24h Change: ${priceData.change24h}%\n` +
-                  `🏦 FDV: $${priceData.fdv.toLocaleString()}\n` +
-                  `🔗 [View on DexScreener](${priceData.url})`;
-        } else {
-          reply = "❌ Error fetching price. Try again later.";
-        }
-      } else if (text === "/lastbuys") {
-        if (lastBuys.length === 0) {
-          reply = "No recent buys yet!";
-        } else {
-          reply = `🛒 *Last Buys*\n` + lastBuys.map((b, i) =>
-            `${i+1}. ${b.amount} ${TOKEN_NAME} → ${b.toWallet} ($${b.usdValue.toFixed(2)})`
-          ).join("\n");
-        }
+      // 🚫 BLOCK NON-ADMINS
+      if (!isAdmin(user_id)) {
+        if (isMuted) return NextResponse.json({ ok: true });
+        if (isSpam(text)) return NextResponse.json({ ok: true });
+        if (text.startsWith("/")) return NextResponse.json({ ok: true });
       }
 
-      await sendTelegramMessage(reply, chat_id);
+      let reply = "";
+
+      // 🔐 ADMIN COMMANDS
+      if (text === "/mute" && isAdmin(user_id)) {
+        isMuted = true;
+        reply = "🔇 Bot muted for non-admin users.";
+      }
+
+      else if (text === "/unmute" && isAdmin(user_id)) {
+        isMuted = false;
+        reply = "🔊 Bot unmuted. Non-admin users can talk again.";
+      }
+
+      // 🤖 PUBLIC COMMANDS
+      else if (text === "/start") {
+        reply =
+          `🚀 *Welcome to ${TOKEN_NAME} Bot!*\n\n` +
+          `💡 Commands:\n` +
+          `/price - Token price\n` +
+          `/lastbuys - Recent buyers`;
+      }
+
+      else if (text === "/ping") {
+        reply = "✅ Bot is running on Vercel";
+      }
+
+      else if (text === "/price") {
+        const priceData = await getTokenPrice();
+        reply = priceData
+          ? `📊 *${TOKEN_NAME} Stats*\n\n` +
+            `💰 Price: $${priceData.price.toFixed(6)}\n` +
+            `📈 24h Change: ${priceData.change24h}%\n` +
+            `🏦 FDV: $${priceData.fdv.toLocaleString()}\n` +
+            `🔗 [View on DexScreener](${priceData.url})`
+          : "❌ Error fetching price.";
+      }
+
+      else if (text === "/lastbuys") {
+        reply =
+          lastBuys.length === 0
+            ? "No recent buys yet!"
+            : `🛒 *Last Buys*\n` +
+              lastBuys
+                .map(
+                  (b, i) =>
+                    `${i + 1}. ${b.amount} ${TOKEN_NAME} → ${b.toWallet} ($${b.usdValue.toFixed(2)})`
+                )
+                .join("\n");
+      }
+
+      if (reply) await sendTelegramMessage(reply, chat_id);
       return NextResponse.json({ ok: true });
     }
 
-    // --- Helius Webhook (Buy Only) ---
+    // ---------- HELIUS BUY ALERTS ----------
     if (Array.isArray(data)) {
       const priceData = await getTokenPrice();
+
       for (const tx of data) {
         if (!tx.tokenTransfers) continue;
 
@@ -95,7 +157,7 @@ export async function POST(req) {
           if (t.mint !== TARGET_MINT) continue;
 
           const amount = Number(t.tokenAmount || 0);
-          if (amount <= 0) continue; // only buy
+          if (amount <= 0) continue;
 
           const usdValue = priceData ? amount * priceData.price : 0;
 
@@ -107,7 +169,6 @@ export async function POST(req) {
             `🧑 Buyer Wallet: \`${t.to}\`\n` +
             `📥 From Wallet: \`${t.from}\``;
 
-          // Store last 10 buys
           lastBuys.unshift({ amount, usdValue, toWallet: t.to });
           if (lastBuys.length > 10) lastBuys.pop();
 
@@ -121,11 +182,14 @@ export async function POST(req) {
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Webhook handling error:", err);
-    return NextResponse.json({ error: "Telegram/Helius webhook error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Telegram/Helius webhook error" },
+      { status: 500 }
+    );
   }
 }
 
-// GET: health check
+// ===== HEALTH CHECK =====
 export async function GET() {
   return NextResponse.json({ status: "Telegram bot endpoint active" });
 }
